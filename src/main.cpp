@@ -2,6 +2,9 @@
 
 #include <DFRobotDFPlayerMini.h>
 
+#include <AceButton.h>
+using namespace ace_button;
+
 /***************************************************
 DFPlayer - A Mini MP3 Player For Arduino
  <https://www.dfrobot.com/index.php?route=product/product&product_id=1121>
@@ -28,138 +31,97 @@ DFPlayer - A Mini MP3 Player For Arduino
 #include "DFRobotDFPlayerMini.h"
 
 // this constant won't change:
-const int buttonPin = 7;   // the pin that the pushbutton is attached to
-                           // Variables will change:
-int buttonPushCounter = 0; // counter for the number of button presses
-int buttonState = 0;       // current state of the button
-int lastButtonState = 0;   // previous state of the button
+const int BIGRED = 5;   // the pin that the pushbutton is attached to
+const int FWD = 6;
+const int PREV = 7;
+
+const int VOLUME = A1;
+int volumeCurrent = 0;
+int currentVolumeValue = 0;
+int volumeValue = 0;
 
 SoftwareSerial mySoftwareSerial(2, 3); // RX, TX
 DFRobotDFPlayerMini myDFPlayer;
-void printDetail(uint8_t type, int value);
+
+AceButton btnBigRed(BIGRED);
+AceButton btnFwd(FWD);
+AceButton btnPrev(PREV);
+
+//void printDetail(uint8_t type, int value);
+
+// header function
+void handleBigRed(AceButton*, uint8_t, uint8_t);
+void handleFwd(AceButton*, uint8_t, uint8_t);
+void handlePrev(AceButton*, uint8_t, uint8_t);
 
 void setup()
 {
-  //mySoftwareSerial.begin(9600);
-  // initialize the button pin as a input:
-  pinMode(buttonPin, INPUT);
-  // initialize serial communication:
+   // initialize serial communication:
   Serial.begin(9600);
 
-  /*   Serial.println();
-  Serial.println(F("DFRobot DFPlayer Mini Demo"));
-  Serial.println(F("Initializing DFPlayer ... (May take 3~5 seconds)"));
+  // initialize pins
+  pinMode(BIGRED, INPUT);
+  pinMode(FWD, INPUT);
+  pinMode(PREV, INPUT);
 
-  if (!myDFPlayer.begin(mySoftwareSerial))
-  { //Use softwareSerial to communicate with mp3.
-    Serial.println(F("Unable to begin:"));
-    Serial.println(F("1.Please recheck the connection!"));
-    Serial.println(F("2.Please insert the SD card!"));
-    while (true)
-      ;
-  }
-  Serial.println(F("DFPlayer Mini online."));
+  // configure big red button
+  ButtonConfig *btnBigRedConfig = btnBigRed.getButtonConfig();
+  btnBigRedConfig->setEventHandler(handleBigRed);
+  btnBigRedConfig->setFeature(ButtonConfig::kFeatureClick);
+  btnBigRedConfig->setFeature(ButtonConfig::kFeatureDoubleClick);
+  btnBigRedConfig->setFeature(ButtonConfig::kFeatureLongPress);
 
-  myDFPlayer.volume(10); //Set volume value. From 0 to 30
-  myDFPlayer.play(1);    //Play the first mp3 */
+  // configure fwd button
+  ButtonConfig *btnFwdConfig = btnFwd.getButtonConfig();
+  btnFwdConfig->setEventHandler(handleFwd);
+  btnFwdConfig->setFeature(ButtonConfig::kFeatureClick);
+
+  // configure prev button
+  ButtonConfig *btnPrevConfig = btnPrev.getButtonConfig();
+  btnPrevConfig->setEventHandler(handlePrev);
+  btnPrevConfig->setFeature(ButtonConfig::kFeatureClick);
 }
 
 void loop()
 {
-  /*   // read the pushbutton input pin:
-  buttonState = digitalRead(buttonPin);
+  volumeCurrent = analogRead(VOLUME);
+  volumeValue = round(volumeCurrent / 1024 * 30);
 
-  // compare the buttonState to its previous state
-  if (buttonState != lastButtonState)
-  {
-    // if the state has changed, increment the counter
-    if (buttonState == HIGH)
-    {
-      // if the current state is HIGH then the button went from off to on:
-      buttonPushCounter++;
-      Serial.println("on");
-      Serial.print("number of button pushes: ");
-      Serial.println(buttonPushCounter);
-    }
-    else
-    {
-      // if the current state is LOW then the button went from on to off:
-      Serial.println("off");
-    }
-    // Delay a little bit to avoid bouncing
-    delay(200);
-  }
-  // save the current state as the last state, for next time through the loop
-  lastButtonState = buttonState;
-
-  static unsigned long timer = millis();
-
-  if (millis() - timer > 10000)
-  {
-    timer = millis();
-    myDFPlayer.next(); //Play next mp3 every 3 second.
+  if (volumeValue != currentVolumeValue) {
+    currentVolumeValue = volumeValue;
+    Serial.println("Volume: "+ currentVolumeValue);
   }
 
-  if (myDFPlayer.available())
-  {
-    printDetail(myDFPlayer.readType(), myDFPlayer.read()); //Print the detail message from DFPlayer to handle different errors and states.
-  } */
+  btnBigRed.check();
+  btnFwd.check();
+  btnFwd.check();
+
 }
 
-void printDetail(uint8_t type, int value)
-{
-  switch (type)
-  {
-  case TimeOut:
-    Serial.println(F("Time Out!"));
-    break;
-  case WrongStack:
-    Serial.println(F("Stack Wrong!"));
-    break;
-  case DFPlayerCardInserted:
-    Serial.println(F("Card Inserted!"));
-    break;
-  case DFPlayerCardRemoved:
-    Serial.println(F("Card Removed!"));
-    break;
-  case DFPlayerCardOnline:
-    Serial.println(F("Card Online!"));
-    break;
-  case DFPlayerPlayFinished:
-    Serial.print(F("Number:"));
-    Serial.print(value);
-    Serial.println(F(" Play Finished!"));
-    break;
-  case DFPlayerError:
-    Serial.print(F("DFPlayerError:"));
-    switch (value)
-    {
-    case Busy:
-      Serial.println(F("Card not found"));
+void handleBigRed(AceButton*, uint8_t eventType, uint8_t){
+  switch (eventType) {
+    case AceButton::kEventClicked:
+      Serial.println("Big Red single click");
       break;
-    case Sleeping:
-      Serial.println(F("Sleeping"));
+    case AceButton::kEventDoubleClicked:
+      Serial.println("Big Red double click");
       break;
-    case SerialWrongStack:
-      Serial.println(F("Get Wrong Stack"));
-      break;
-    case CheckSumNotMatch:
-      Serial.println(F("Check Sum Not Match"));
-      break;
-    case FileIndexOut:
-      Serial.println(F("File Index Out of Bound"));
-      break;
-    case FileMismatch:
-      Serial.println(F("Cannot Find File"));
-      break;
-    case Advertise:
-      Serial.println(F("In Advertise"));
-      break;
-    default:
+    case AceButton::kEventLongPressed:
+      Serial.println("Big Red long press");
       break;
     }
-    break;
-  default:
-    break;
+}
+void handleFwd(AceButton*, uint8_t eventType, uint8_t){
+  switch (eventType) {
+    case AceButton::kEventClicked:
+      Serial.println("Fwd single click");
+      break;
+  }
+}
+void handlePrev(AceButton*, uint8_t eventType, uint8_t){
+  switch (eventType) {
+    case AceButton::kEventClicked:
+      Serial.println("Prev single click");
+      break;
   }
 }
