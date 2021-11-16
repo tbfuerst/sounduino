@@ -1,127 +1,155 @@
 #include <SoftwareSerial.h>
-
 #include <DFRobotDFPlayerMini.h>
-
-#include <AceButton.h>
-using namespace ace_button;
-
-/***************************************************
-DFPlayer - A Mini MP3 Player For Arduino
- <https://www.dfrobot.com/index.php?route=product/product&product_id=1121>
-
- ***************************************************
- This example shows the basic function of library for DFPlayer.
-
- Created 2016-12-07
- By [Angelo qiao](Angelo.qiao@dfrobot.com)
-
- GNU Lesser General Public License.
- See <http://www.gnu.org/licenses/> for details.
- All above must be included in any redistribution
- ****************************************************/
-
-/***********Notice and Trouble shooting***************
- 1.Connection and Diagram can be found here
- <https://www.dfrobot.com/wiki/index.php/DFPlayer_Mini_SKU:DFR0299#Connection_Diagram>
- 2.This code is tested on Arduino Uno, Leonardo, Mega boards.
- ****************************************************/
 
 #include "Arduino.h"
 #include "SoftwareSerial.h"
 #include "DFRobotDFPlayerMini.h"
+#include "OneButton.h"
 
-// this constant won't change:
-const int BIGRED = 5;   // the pin that the pushbutton is attached to
+// Match Button constants to pins
+const int BIGRED = 5;
 const int FWD = 6;
 const int PREV = 7;
 
+// Setup for potentiometer to control volume
 const int VOLUME = A1;
 int volumeCurrent = 0;
 int currentVolumeValue = 0;
 int volumeValue = 0;
 
+// Initialize Buttons with OneButton Library
+/* See http://www.mathertel.de/License.aspx
+
+Software License Agreement (BSD License)
+
+Copyright (c) 2005-2014 by Matthias Hertel,  http://www.mathertel.de/
+
+All rights reserved.
+
+Redistribution and use in source and binary forms, with or without modification, are permitted provided that the following conditions are met:
+
+•Redistributions of source code must retain the above copyright notice, this list of conditions and the following disclaimer. 
+•Redistributions in binary form must reproduce the above copyright notice, this list of conditions and the following disclaimer in the documentation and/or other materials provided with the distribution. 
+•Neither the name of the copyright owners nor the names of its contributors may be used to endorse or promote products derived from this software without specific prior written permission. 
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ */
+OneButton btnBigRed(BIGRED, false);
+OneButton btnFwd(FWD, false);
+OneButton btnPrev(PREV, false);
+
+// States definition for Sounduino FSM
+typedef enum
+{
+  notPlaying_State,
+  playingSerial_State,
+  playingShuffle_State,
+  playingCard_State,
+  playingStopdance_State,
+  progWait_State,
+  progDelete_State,
+  progPending_State,
+  deterPlayingState_State,
+  menu_State,
+  initializing_State,
+} SounduinoState;
+
+// Events definition for Sounduino FSM
+typedef enum
+{
+  bigRedSingle_Event,
+  bigRedDouble_Event,
+  bigRedLong_Event,
+  fwdSingle_Event,
+  prevSingle_Event,
+  presentCard_Event,
+  initialized_Event,
+  determinationFailed_Event,
+  cardProgrammed_Event
+
+} SounduinoEvent;
+
+//typedef of function pointer
+typedef SounduinoState (*pfEventHandler)(void);
+
+typedef struct
+{
+  SounduinoState eStateMachine;
+  SounduinoState eStateMachineEvent;
+  pfEventHandler pfStateMachineEvnentHandler;
+} SounduinoStateMachine;
+
+// Setup for communication with DFPlayer mini MP3-Player
 SoftwareSerial mySoftwareSerial(2, 3); // RX, TX
 DFRobotDFPlayerMini myDFPlayer;
 
-AceButton btnBigRed(BIGRED);
-AceButton btnFwd(FWD);
-AceButton btnPrev(PREV);
-
-//void printDetail(uint8_t type, int value);
-
-// header function
-void handleBigRed(AceButton*, uint8_t, uint8_t);
-void handleFwd(AceButton*, uint8_t, uint8_t);
-void handlePrev(AceButton*, uint8_t, uint8_t);
+//function headers
+void onBigRedPress();
+void onBigRedDoublePress();
+void onBigRedLongPress();
+void onFwdPress();
+void onPrevPress();
+void handlePotentiometer();
 
 void setup()
 {
-   // initialize serial communication:
+  // initialize serial communication:
   Serial.begin(9600);
 
-  // initialize pins
-  pinMode(BIGRED, INPUT);
-  pinMode(FWD, INPUT);
-  pinMode(PREV, INPUT);
+  // initialize possible button actions
+  btnBigRed.attachClick(onBigRedPress);
+  btnBigRed.attachDoubleClick(onBigRedDoublePress);
+  btnBigRed.attachLongPressStop(onBigRedLongPress);
 
-  // configure big red button
-  ButtonConfig *btnBigRedConfig = btnBigRed.getButtonConfig();
-  btnBigRedConfig->setEventHandler(handleBigRed);
-  btnBigRedConfig->setFeature(ButtonConfig::kFeatureClick);
-  btnBigRedConfig->setFeature(ButtonConfig::kFeatureDoubleClick);
-  btnBigRedConfig->setFeature(ButtonConfig::kFeatureLongPress);
+  btnFwd.attachClick(onFwdPress);
 
-  // configure fwd button
-  ButtonConfig *btnFwdConfig = btnFwd.getButtonConfig();
-  btnFwdConfig->setEventHandler(handleFwd);
-  btnFwdConfig->setFeature(ButtonConfig::kFeatureClick);
-
-  // configure prev button
-  ButtonConfig *btnPrevConfig = btnPrev.getButtonConfig();
-  btnPrevConfig->setEventHandler(handlePrev);
-  btnPrevConfig->setFeature(ButtonConfig::kFeatureClick);
+  btnPrev.attachClick(onPrevPress);
 }
 
 void loop()
 {
+
+  // listen to buttonPress
+  btnBigRed.tick();
+  btnFwd.tick();
+  btnPrev.tick();
+
+  //handle potentiometer
+  handlePotentiometer();
+}
+
+void handlePotentiometer()
+{
   volumeCurrent = analogRead(VOLUME);
-  volumeValue = round(volumeCurrent / 1024 * 30);
+  volumeValue = round(volumeCurrent / 1024.0 * 30);
 
-  if (volumeValue != currentVolumeValue) {
+  if (volumeValue != currentVolumeValue)
+  {
     currentVolumeValue = volumeValue;
-    Serial.println("Volume: "+ currentVolumeValue);
-  }
-
-  btnBigRed.check();
-  btnFwd.check();
-  btnFwd.check();
-
-}
-
-void handleBigRed(AceButton*, uint8_t eventType, uint8_t){
-  switch (eventType) {
-    case AceButton::kEventClicked:
-      Serial.println("Big Red single click");
-      break;
-    case AceButton::kEventDoubleClicked:
-      Serial.println("Big Red double click");
-      break;
-    case AceButton::kEventLongPressed:
-      Serial.println("Big Red long press");
-      break;
-    }
-}
-void handleFwd(AceButton*, uint8_t eventType, uint8_t){
-  switch (eventType) {
-    case AceButton::kEventClicked:
-      Serial.println("Fwd single click");
-      break;
+    String printout = "Volume:";
+    printout = printout + currentVolumeValue;
+    Serial.println(printout);
   }
 }
-void handlePrev(AceButton*, uint8_t eventType, uint8_t){
-  switch (eventType) {
-    case AceButton::kEventClicked:
-      Serial.println("Prev single click");
-      break;
-  }
+
+void onBigRedPress()
+{
+  Serial.println("big red pressed!");
+}
+
+void onBigRedDoublePress()
+{
+  Serial.println("big red double pressed!");
+}
+void onBigRedLongPress()
+{
+  Serial.println("big red long pressed!");
+}
+void onFwdPress()
+{
+  Serial.println("fwd pressed!");
+}
+void onPrevPress()
+{
+  Serial.println("prev pressed!");
 }
