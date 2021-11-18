@@ -60,6 +60,7 @@ typedef enum
   bigRedSingle_Event,
   bigRedDouble_Event,
   bigRedLong_Event,
+  songEnded_Event,
   fwdSingle_Event,
   prevSingle_Event,
   presentCard_Event,
@@ -70,13 +71,13 @@ typedef enum
 } SounduinoEvent;
 
 //typedef of function pointer
-typedef SounduinoState (*pfEventHandler)(void);
+typedef SounduinoState (*SounduinoEventHandler)(void);
 
 typedef struct
 {
-  SounduinoState eStateMachine;
-  SounduinoState eStateMachineEvent;
-  pfEventHandler pfStateMachineEvnentHandler;
+  SounduinoState state;
+  SounduinoEvent event;
+  SounduinoEventHandler eventHandler;
 } SounduinoStateMachine;
 
 // Setup for communication with DFPlayer mini MP3-Player
