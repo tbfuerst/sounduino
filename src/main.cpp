@@ -2,9 +2,9 @@
 #include <DFRobotDFPlayerMini.h>
 
 #include "Arduino.h"
-#include "SoftwareSerial.h"
-#include "DFRobotDFPlayerMini.h"
 #include "OneButton.h"
+
+//debug libraries
 
 // Match Button constants to pins
 const int BIGRED = 5;
@@ -52,6 +52,7 @@ typedef enum
   deterPlayingState_State,
   menu_State,
   initializing_State,
+  state_count
 } SounduinoState;
 
 // Events definition for Sounduino FSM
@@ -66,25 +67,52 @@ typedef enum
   presentCard_Event,
   initialized_Event,
   determinationFailed_Event,
-  cardProgrammed_Event
-
+  cardProgrammed_Event,
+  no_Event,
+  event_count
 } SounduinoEvent;
 
 //typedef of function pointer
 typedef SounduinoState (*SounduinoEventHandler)(void);
 
+//declaration of transition tables which includes function pointers
+SounduinoEventHandler transitionTable[state_count][event_count];
+
+// transition function headers
+SounduinoState transNotPlaying(void);
+SounduinoState transPlayingSerial(void);
+SounduinoState transPlayingShuffle(void);
+SounduinoState transPlayingCard(void);
+SounduinoState transPlayingStopdance(void);
+SounduinoState transProgWait(void);
+SounduinoState transProgDelete(void);
+SounduinoState transProgPending(void);
+SounduinoState transDeterPlayingState(void);
+SounduinoState transMenu(void);
+SounduinoState transInitializing(void);
+SounduinoState doNothing(void);
+
+//SounduinoState (*transitionTable[state_count][event_count])(void);
+
+typedef struct
+{
+  int test;
+  int test2;
+} SounduinoStateProperties;
+
 typedef struct
 {
   SounduinoState state;
   SounduinoEvent event;
-  SounduinoEventHandler eventHandler;
+  SounduinoStateProperties stateProperties;
 } SounduinoStateMachine;
 
-// Setup for communication with DFPlayer mini MP3-Player
+SounduinoStateMachine fsm = {.state = initializing_State, .event = no_Event, .stateProperties = {.test = 1, .test2 = 2}};
+
 SoftwareSerial mySoftwareSerial(2, 3); // RX, TX
 DFRobotDFPlayerMini myDFPlayer;
 
-//function headers
+//event function headers
 void onBigRedPress();
 void onBigRedDoublePress();
 void onBigRedLongPress();
@@ -96,6 +124,55 @@ void setup()
 {
   // initialize serial communication:
   Serial.begin(9600);
+  transInitializing();
+
+  for (size_t i = 0; i < state_count; i++)
+  {
+    for (size_t j = 0; j < event_count; j++)
+    {
+      transitionTable[i][j] = doNothing;
+    }
+  }
+
+  // Set up state transition table
+  transitionTable[notPlaying_State][presentCard_Event] = transPlayingCard;
+  transitionTable[notPlaying_State][bigRedSingle_Event] = transDeterPlayingState;
+  transitionTable[notPlaying_State][bigRedDouble_Event] = transMenu;
+
+  transitionTable[playingShuffle_State][bigRedSingle_Event] = transNotPlaying;
+  transitionTable[playingShuffle_State][fwdSingle_Event] = transPlayingShuffle;
+  transitionTable[playingShuffle_State][prevSingle_Event] = transPlayingShuffle;
+  transitionTable[playingShuffle_State][bigRedLong_Event] = transProgWait;
+  transitionTable[playingShuffle_State][bigRedDouble_Event] = transMenu;
+
+  transitionTable[playingSerial_State][bigRedSingle_Event] = transNotPlaying;
+  transitionTable[playingSerial_State][fwdSingle_Event] = transPlayingSerial;
+  transitionTable[playingSerial_State][prevSingle_Event] = transPlayingSerial;
+  transitionTable[playingSerial_State][bigRedLong_Event] = transProgWait;
+  transitionTable[playingSerial_State][bigRedDouble_Event] = transMenu;
+
+  transitionTable[playingStopdance_State][bigRedSingle_Event] = transNotPlaying;
+  transitionTable[playingStopdance_State][fwdSingle_Event] = transPlayingStopdance;
+  transitionTable[playingStopdance_State][prevSingle_Event] = transPlayingStopdance;
+  transitionTable[playingStopdance_State][bigRedLong_Event] = transProgWait;
+  transitionTable[playingStopdance_State][bigRedDouble_Event] = transMenu;
+
+  transitionTable[playingCard_State][bigRedSingle_Event] = transNotPlaying;
+  transitionTable[playingCard_State][bigRedLong_Event] = transProgDelete;
+  transitionTable[playingCard_State][bigRedDouble_Event] = transMenu;
+
+  transitionTable[progWait_State][presentCard_Event] = transProgPending;
+
+  transitionTable[progDelete_State][presentCard_Event] = transProgPending;
+
+  transitionTable[progPending_State][cardProgrammed_Event] = transDeterPlayingState;
+
+  transitionTable[menu_State][bigRedSingle_Event] = transPlayingShuffle;
+  transitionTable[menu_State][bigRedDouble_Event] = transDeterPlayingState;
+  transitionTable[menu_State][fwdSingle_Event] = transPlayingSerial;
+  transitionTable[menu_State][prevSingle_Event] = transPlayingShuffle;
+
+  transitionTable[deterPlayingState_State][determinationFailed_Event] = transNotPlaying;
 
   // initialize possible button actions
   btnBigRed.attachClick(onBigRedPress);
@@ -105,10 +182,14 @@ void setup()
   btnFwd.attachClick(onFwdPress);
 
   btnPrev.attachClick(onPrevPress);
+
+  fsm.state = transNotPlaying();
 }
 
 void loop()
 {
+
+  fsm.event = no_Event;
 
   // listen to buttonPress
   btnBigRed.tick();
@@ -117,6 +198,25 @@ void loop()
 
   //handle potentiometer
   handlePotentiometer();
+
+  //evaluate state
+  if (fsm.event != no_Event)
+  {
+    Serial.println("Before:");
+    Serial.println(fsm.state);
+    Serial.println(fsm.event);
+    Serial.println("---");
+    Serial.println("After:");
+    fsm.state = transitionTable[fsm.state][fsm.event]();
+    Serial.println(fsm.state);
+    Serial.println(fsm.event);
+  }
+}
+
+void handleCardReader()
+{
+  if (false)
+    fsm.event = presentCard_Event;
 }
 
 void handlePotentiometer()
@@ -136,21 +236,87 @@ void handlePotentiometer()
 void onBigRedPress()
 {
   Serial.println("big red pressed!");
+  fsm.event = bigRedSingle_Event;
 }
 
 void onBigRedDoublePress()
 {
   Serial.println("big red double pressed!");
+  fsm.event = bigRedDouble_Event;
 }
 void onBigRedLongPress()
 {
   Serial.println("big red long pressed!");
+  fsm.event = bigRedLong_Event;
 }
 void onFwdPress()
 {
   Serial.println("fwd pressed!");
+  fsm.event = fwdSingle_Event;
 }
 void onPrevPress()
 {
   Serial.println("prev pressed!");
+  fsm.event = prevSingle_Event;
+}
+
+SounduinoState transNotPlaying(void)
+{
+  Serial.println("State: not Playing");
+  return notPlaying_State;
+}
+
+SounduinoState transPlayingSerial(void)
+{
+  Serial.println("State: playingSerial");
+  return playingSerial_State;
+}
+SounduinoState transPlayingShuffle(void)
+{
+  Serial.println("State: playingShuffle");
+  return playingShuffle_State;
+}
+SounduinoState transPlayingCard(void)
+{
+  Serial.println("State: playingCard");
+  return playingCard_State;
+}
+SounduinoState transPlayingStopdance(void)
+{
+  Serial.println("State: playingStopdance");
+  return playingStopdance_State;
+}
+SounduinoState transProgWait(void)
+{
+  Serial.println("State: progWait");
+  return progWait_State;
+}
+SounduinoState transProgDelete(void)
+{
+  Serial.println("State: progDelete");
+  return progDelete_State;
+}
+SounduinoState transProgPending(void)
+{
+  Serial.println("State: progPending");
+  return progPending_State;
+}
+SounduinoState transDeterPlayingState(void)
+{
+  Serial.println("State: deterPlayingState");
+  return deterPlayingState_State;
+}
+SounduinoState transMenu(void)
+{
+  Serial.println("State: menu");
+  return menu_State;
+}
+SounduinoState transInitializing(void)
+{
+  Serial.println("State: initializing");
+  return initializing_State;
+}
+SounduinoState doNothing(void)
+{
+  return fsm.state;
 }
