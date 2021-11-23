@@ -17,6 +17,9 @@ int volumeCurrent = 0;
 int currentVolumeValue = 0;
 int volumeValue = 0;
 
+// count state transitions
+int transitioncounter = 0;
+
 // Initialize Buttons with OneButton Library
 /* See http://www.mathertel.de/License.aspx
 
@@ -120,10 +123,14 @@ void onFwdPress();
 void onPrevPress();
 void handlePotentiometer();
 
+char *eventToText(SounduinoEvent event);
+char *stateToText(SounduinoState state);
+
 void setup()
 {
   // initialize serial communication:
   Serial.begin(9600);
+  Serial.println("---------- Begin setup ----------");
   transInitializing();
 
   for (size_t i = 0; i < state_count; i++)
@@ -162,6 +169,7 @@ void setup()
   transitionTable[playingCard_State][bigRedDouble_Event] = transMenu;
 
   transitionTable[progWait_State][presentCard_Event] = transProgPending;
+  transitionTable[progWait_State][bigRedLong_Event] = transDeterPlayingState;
 
   transitionTable[progDelete_State][presentCard_Event] = transProgPending;
 
@@ -170,7 +178,7 @@ void setup()
   transitionTable[menu_State][bigRedSingle_Event] = transPlayingShuffle;
   transitionTable[menu_State][bigRedDouble_Event] = transDeterPlayingState;
   transitionTable[menu_State][fwdSingle_Event] = transPlayingSerial;
-  transitionTable[menu_State][prevSingle_Event] = transPlayingShuffle;
+  transitionTable[menu_State][prevSingle_Event] = transPlayingStopdance;
 
   transitionTable[deterPlayingState_State][determinationFailed_Event] = transNotPlaying;
 
@@ -184,6 +192,8 @@ void setup()
   btnPrev.attachClick(onPrevPress);
 
   fsm.state = transNotPlaying();
+  Serial.println("---------- End Setup ----------");
+  Serial.println("");
 }
 
 void loop()
@@ -202,14 +212,20 @@ void loop()
   //evaluate state
   if (fsm.event != no_Event)
   {
-    Serial.println("Before:");
-    Serial.println(fsm.state);
-    Serial.println(fsm.event);
-    Serial.println("---");
-    Serial.println("After:");
+    Serial.println("");
+    Serial.print("------ Transition ");
+    Serial.print(transitioncounter);
+    Serial.println(" ------");
+    Serial.print("Before: ");
+    Serial.println(stateToText(fsm.state));
+    Serial.print("Event: ");
+    Serial.println(eventToText(fsm.event));
+    Serial.print("Action: ");
     fsm.state = transitionTable[fsm.state][fsm.event]();
-    Serial.println(fsm.state);
-    Serial.println(fsm.event);
+    Serial.print("After: ");
+    Serial.print(stateToText(fsm.state));
+    Serial.println("");
+    transitioncounter++;
   }
 }
 
@@ -235,88 +251,125 @@ void handlePotentiometer()
 
 void onBigRedPress()
 {
-  Serial.println("big red pressed!");
   fsm.event = bigRedSingle_Event;
 }
 
 void onBigRedDoublePress()
 {
-  Serial.println("big red double pressed!");
   fsm.event = bigRedDouble_Event;
 }
 void onBigRedLongPress()
 {
-  Serial.println("big red long pressed!");
   fsm.event = bigRedLong_Event;
 }
 void onFwdPress()
 {
-  Serial.println("fwd pressed!");
   fsm.event = fwdSingle_Event;
 }
 void onPrevPress()
 {
-  Serial.println("prev pressed!");
   fsm.event = prevSingle_Event;
 }
 
 SounduinoState transNotPlaying(void)
 {
-  Serial.println("State: not Playing");
+  Serial.println("Transition to: not Playing");
   return notPlaying_State;
 }
 
 SounduinoState transPlayingSerial(void)
 {
-  Serial.println("State: playingSerial");
+  Serial.println("Transition to: playingSerial");
   return playingSerial_State;
 }
 SounduinoState transPlayingShuffle(void)
 {
-  Serial.println("State: playingShuffle");
+  Serial.println("Transition to: playingShuffle");
   return playingShuffle_State;
 }
 SounduinoState transPlayingCard(void)
 {
-  Serial.println("State: playingCard");
+  Serial.println("Transition to: playingCard");
   return playingCard_State;
 }
 SounduinoState transPlayingStopdance(void)
 {
-  Serial.println("State: playingStopdance");
+  Serial.println("Transition to: playingStopdance");
   return playingStopdance_State;
 }
 SounduinoState transProgWait(void)
 {
-  Serial.println("State: progWait");
+  Serial.println("Transition to: progWait");
   return progWait_State;
 }
 SounduinoState transProgDelete(void)
 {
-  Serial.println("State: progDelete");
+  Serial.println("Transition to: progDelete");
   return progDelete_State;
 }
 SounduinoState transProgPending(void)
 {
-  Serial.println("State: progPending");
+  Serial.println("Transition to: progPending");
   return progPending_State;
 }
 SounduinoState transDeterPlayingState(void)
 {
-  Serial.println("State: deterPlayingState");
-  return deterPlayingState_State;
+  // determine state to transition to
+  SounduinoState stateBefore = playingShuffle_State;
+  Serial.print("Transition to: ");
+  Serial.print(stateToText(stateBefore));
+  Serial.print(" via: ");
+  Serial.println("deterPlayingState_State");
+  return stateBefore;
 }
 SounduinoState transMenu(void)
 {
-  Serial.println("State: menu");
+  Serial.println("Transition to: menu");
   return menu_State;
 }
 SounduinoState transInitializing(void)
 {
-  Serial.println("State: initializing");
+  Serial.println("Transition to: initializing");
   return initializing_State;
 }
 SounduinoState doNothing(void)
 {
+  Serial.println("Nothing happens");
   return fsm.state;
+}
+
+char *stateToText(SounduinoState state)
+{
+  char *statetext[] = {
+      "notPlaying_State",
+      "playingSerial_State",
+      "playingShuffle_State",
+      "playingCard_State",
+      "playingStopdance_State",
+      "progWait_State",
+      "progDelete_State",
+      "progPending_State",
+      "deterPlayingState_State",
+      "menu_State",
+      "initializing_State",
+      "state_count"};
+  return statetext[state];
+}
+
+char *eventToText(SounduinoEvent event)
+{
+  char *eventtext[] = {
+      "bigRedSingle_Event",
+      "bigRedDouble_Event",
+      "bigRedLong_Event",
+      "songEnded_Event",
+      "fwdSingle_Event",
+      "prevSingle_Event",
+      "presentCard_Event",
+      "initialized_Event",
+      "determinationFailed_Event",
+      "cardProgrammed_Event",
+      "no_Event",
+      "event_count"};
+  return eventtext[event];
 }
