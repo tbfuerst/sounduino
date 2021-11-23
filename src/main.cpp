@@ -1,10 +1,4 @@
-#include <SoftwareSerial.h>
-#include <DFRobotDFPlayerMini.h>
-
 #include "Arduino.h"
-#include "OneButton.h"
-
-//debug libraries
 
 // Match Button constants to pins
 const int BIGRED = 5;
@@ -20,6 +14,7 @@ int volumeValue = 0;
 // count state transitions
 int transitioncounter = 0;
 
+#include "OneButton.h"
 // Initialize Buttons with OneButton Library
 /* See http://www.mathertel.de/License.aspx
 
@@ -41,7 +36,76 @@ OneButton btnBigRed(BIGRED, false);
 OneButton btnFwd(FWD, false);
 OneButton btnPrev(PREV, false);
 
-// States definition for Sounduino FSM
+#include <SPI.h>
+#include <MFRC522.h>
+#include <stdint.h>
+/**
+ * ----------------------------------------------------------------------------
+ * This is a MFRC522 library example; see https://github.com/miguelbalboa/rfid
+ * for further details and other examples.
+ *
+ * NOTE: The library file MFRC522.h has a lot of useful info. Please read it.
+ *
+ * Released into the public domain.
+ * ----------------------------------------------------------------------------
+ * This sample shows how to read and write data blocks on a MIFARE Classic PICC
+ * (= card/tag).
+ *
+ * BEWARE: Data will be written to the PICC, in sector #1 (blocks #4 to #7).
+ *
+  * -----------------------------------------
+  * Pin layout
+  * -----------------------------------------
+  * MFRC522      Arduino
+  * Reader       Nano
+  * Pin          Pin
+  * -----------------------------------------
+  * RST          D9
+  * SDA(SS)      D10
+  * MOSI         D11
+  * MISO         D12
+  * SCK          D13
+  * NC(IRQ)      not used
+  * 3.3V         3.3V
+  * GND          GND
+  * --------------------------------------------------------------------------
+  */
+#define RST_PIN 9                 // Configurable, see typical pin layout above
+#define SS_PIN 10                 // Configurable, see typical pin layout above
+MFRC522 mfrc522(SS_PIN, RST_PIN); // Create MFRC522 instance.
+MFRC522::MIFARE_Key key;
+
+#include <DFRobotDFPlayerMini.h>
+#include <SoftwareSerial.h>
+
+/***************************************************
+ DFPlayer - A Mini MP3 Player For Arduino
+ <https://www.dfrobot.com/product-1121.html>
+
+ ***************************************************
+ This example shows the all the function of library for DFPlayer.
+
+ Created 2016-12-07
+ By [Angelo qiao](Angelo.qiao@dfrobot.com)
+
+ GNU Lesser General Public License.
+ See <http://www.gnu.org/licenses/> for details.
+ All above must be included in any redistribution
+ ****************************************************/
+
+/***********Notice and Trouble shooting***************
+ 1.Connection and Diagram can be found here
+<https://www.dfrobot.com/wiki/index.php/DFPlayer_Mini_SKU:DFR0299#Connection_Diagram>
+ 2.This code is tested on Arduino Uno, Leonardo, Mega boards.
+ ****************************************************/
+
+SoftwareSerial mySoftwareSerial(2, 3); // RX, TX
+DFRobotDFPlayerMini myDFPlayer;
+
+/***************************************************
+ Sounduino States and Events
+
+ ****************************************************/
 typedef enum
 {
   notPlaying_State,
@@ -70,15 +134,21 @@ typedef enum
   presentCard_Event,
   initialized_Event,
   determinationFailed_Event,
+  cardProgrammingFailed_Event,
   cardProgrammed_Event,
   no_Event,
   event_count
 } SounduinoEvent;
 
-//typedef of function pointer
+/***************************************************
+ Sounduino State Machine Transition Table
+
+ ****************************************************/
+
+//typedef of a function pointer to use in the following transition table
 typedef SounduinoState (*SounduinoEventHandler)(void);
 
-//declaration of transition tables which includes function pointers
+//declaration of a transition table which includes function pointers to the respective transition function
 SounduinoEventHandler transitionTable[state_count][event_count];
 
 // transition function headers
@@ -95,44 +165,8 @@ SounduinoState transMenu(void);
 SounduinoState transInitializing(void);
 SounduinoState doNothing(void);
 
-//SounduinoState (*transitionTable[state_count][event_count])(void);
-
-typedef struct
+void initializeTransitionTable()
 {
-  int test;
-  int test2;
-} SounduinoStateProperties;
-
-typedef struct
-{
-  SounduinoState state;
-  SounduinoEvent event;
-  SounduinoStateProperties stateProperties;
-} SounduinoStateMachine;
-
-SounduinoStateMachine fsm = {.state = initializing_State, .event = no_Event, .stateProperties = {.test = 1, .test2 = 2}};
-
-SoftwareSerial mySoftwareSerial(2, 3); // RX, TX
-DFRobotDFPlayerMini myDFPlayer;
-
-//event function headers
-void onBigRedPress();
-void onBigRedDoublePress();
-void onBigRedLongPress();
-void onFwdPress();
-void onPrevPress();
-void handlePotentiometer();
-
-char *eventToText(SounduinoEvent event);
-char *stateToText(SounduinoState state);
-
-void setup()
-{
-  // initialize serial communication:
-  Serial.begin(9600);
-  Serial.println("---------- Begin setup ----------");
-  transInitializing();
-
   for (size_t i = 0; i < state_count; i++)
   {
     for (size_t j = 0; j < event_count; j++)
@@ -174,6 +208,7 @@ void setup()
   transitionTable[progDelete_State][presentCard_Event] = transProgPending;
 
   transitionTable[progPending_State][cardProgrammed_Event] = transDeterPlayingState;
+  transitionTable[progPending_State][cardProgrammingFailed_Event] = transProgWait;
 
   transitionTable[menu_State][bigRedSingle_Event] = transPlayingShuffle;
   transitionTable[menu_State][bigRedDouble_Event] = transDeterPlayingState;
@@ -181,6 +216,75 @@ void setup()
   transitionTable[menu_State][prevSingle_Event] = transPlayingStopdance;
 
   transitionTable[deterPlayingState_State][determinationFailed_Event] = transNotPlaying;
+}
+
+//function pointer to store last playing State to transition to
+SounduinoEventHandler transToLastPlayState;
+void saveLastPlayState();
+
+/***************************************************
+ Sounduino State Machine
+
+ ***************************************************
+ This state machine uses a Lookup table to make State transitions
+
+ ****************************************************/
+
+typedef struct
+{
+  int test;
+  int test2;
+} SounduinoStateProperties;
+
+typedef struct
+{
+  SounduinoState state;
+  SounduinoEvent event;
+  SounduinoStateProperties stateProperties;
+} SounduinoStateMachine;
+
+SounduinoStateMachine fsm = {.state = initializing_State, .event = no_Event, .stateProperties = {.test = 1, .test2 = 2}};
+
+/***************************************************
+ Sounduino Utility Function headers
+
+ ****************************************************/
+void onBigRedPress();
+void onBigRedDoublePress();
+void onBigRedLongPress();
+void onFwdPress();
+void onPrevPress();
+void handlePotentiometer();
+void handleCard();
+void checkForCard();
+void dump_byte_array(byte *buffer, byte bufferSize);
+void initializeTransitionTable();
+void initializeDFPlayerMini();
+
+char *eventToText(SounduinoEvent event);
+char *stateToText(SounduinoState state);
+
+/***************************************************
+ Sounduino Program Setup
+
+ ****************************************************/
+
+void setup()
+{
+  // initialize serial communication:
+  Serial.begin(9600);
+  Serial.setTimeout(20000);
+  Serial.println("---------- Begin setup ----------");
+
+  // Initialize DFPlayerMini
+  initializeDFPlayerMini();
+
+  //initialize last-state function pointer to fall back to shuffle
+  transToLastPlayState = transPlayingShuffle;
+
+  transInitializing();
+
+  initializeTransitionTable();
 
   // initialize possible button actions
   btnBigRed.attachClick(onBigRedPress);
@@ -191,10 +295,32 @@ void setup()
 
   btnPrev.attachClick(onPrevPress);
 
+  SPI.begin();        // Init SPI bus
+  mfrc522.PCD_Init(); // Init MFRC522 card
+
+  // Prepare the key (used both as key A and as key B)
+  // using FFFFFFFFFFFFh which is the default at chip delivery from the factory
+  for (byte i = 0; i < 6; i++)
+  {
+    key.keyByte[i] = 0xFF;
+  }
+
+  Serial.println(F("Scan a MIFARE Classic PICC to demonstrate read and write."));
+  Serial.print(F("Using key (for A and B):"));
+  dump_byte_array(key.keyByte, MFRC522::MF_KEY_SIZE);
+  Serial.println();
+
+  Serial.println(F("BEWARE: Data will be written to the PICC, in sector #1"));
+
   fsm.state = transNotPlaying();
   Serial.println("---------- End Setup ----------");
   Serial.println("");
 }
+
+/***************************************************
+ Sounduino Program Loop
+
+ ****************************************************/
 
 void loop()
 {
@@ -208,6 +334,9 @@ void loop()
 
   //handle potentiometer
   handlePotentiometer();
+
+  //check for card
+  checkForCard();
 
   //evaluate state
   if (fsm.event != no_Event)
@@ -229,11 +358,10 @@ void loop()
   }
 }
 
-void handleCardReader()
-{
-  if (false)
-    fsm.event = presentCard_Event;
-}
+/***************************************************
+ Sounduino Event Functions
+
+ ****************************************************/
 
 void handlePotentiometer()
 {
@@ -246,6 +374,7 @@ void handlePotentiometer()
     String printout = "Volume:";
     printout = printout + currentVolumeValue;
     Serial.println(printout);
+    myDFPlayer.volume(currentVolumeValue);
   }
 }
 
@@ -271,8 +400,15 @@ void onPrevPress()
   fsm.event = prevSingle_Event;
 }
 
+/***************************************************
+ Sounduino Transition functions
+
+ ****************************************************/
+
 SounduinoState transNotPlaying(void)
 {
+  saveLastPlayState();
+  myDFPlayer.pause();
   Serial.println("Transition to: not Playing");
   return notPlaying_State;
 }
@@ -284,6 +420,7 @@ SounduinoState transPlayingSerial(void)
 }
 SounduinoState transPlayingShuffle(void)
 {
+  myDFPlayer.play(1);
   Serial.println("Transition to: playingShuffle");
   return playingShuffle_State;
 }
@@ -299,6 +436,7 @@ SounduinoState transPlayingStopdance(void)
 }
 SounduinoState transProgWait(void)
 {
+  saveLastPlayState();
   Serial.println("Transition to: progWait");
   return progWait_State;
 }
@@ -315,15 +453,12 @@ SounduinoState transProgPending(void)
 SounduinoState transDeterPlayingState(void)
 {
   // determine state to transition to
-  SounduinoState stateBefore = playingShuffle_State;
-  Serial.print("Transition to: ");
-  Serial.print(stateToText(stateBefore));
-  Serial.print(" via: ");
-  Serial.println("deterPlayingState_State");
-  return stateBefore;
+  Serial.print("via deterPlayingState_State, ");
+  return transToLastPlayState();
 }
 SounduinoState transMenu(void)
 {
+  saveLastPlayState();
   Serial.println("Transition to: menu");
   return menu_State;
 }
@@ -336,6 +471,36 @@ SounduinoState doNothing(void)
 {
   Serial.println("Nothing happens");
   return fsm.state;
+}
+
+/***************************************************
+ Sounduino Utility Functions
+
+ ****************************************************/
+
+void saveLastPlayState()
+{
+  switch (fsm.state)
+  {
+  case playingShuffle_State:
+    transToLastPlayState = transPlayingShuffle;
+    break;
+  case playingSerial_State:
+    transToLastPlayState = transPlayingSerial;
+    break;
+  case notPlaying_State:
+    transToLastPlayState = transNotPlaying;
+    break;
+  case playingCard_State:
+    transToLastPlayState = transPlayingCard;
+    break;
+  case playingStopdance_State:
+    transToLastPlayState = transPlayingStopdance;
+    break;
+  default:
+    transToLastPlayState = transPlayingShuffle;
+    break;
+  }
 }
 
 char *stateToText(SounduinoState state)
@@ -368,8 +533,207 @@ char *eventToText(SounduinoEvent event)
       "presentCard_Event",
       "initialized_Event",
       "determinationFailed_Event",
+      "cardProgrammingFailed_Event"
       "cardProgrammed_Event",
       "no_Event",
       "event_count"};
   return eventtext[event];
+}
+
+/***************************************************
+ Sounduino RFID Reader Functions
+
+ ****************************************************/
+
+/**
+ * Helper routine to dump a byte array as hex values to Serial.
+ */
+void dump_byte_array(byte *buffer, byte bufferSize)
+{
+  for (byte i = 0; i < bufferSize; i++)
+  {
+    Serial.print(buffer[i] < 0x10 ? " 0" : " ");
+    Serial.print(buffer[i], HEX);
+  }
+}
+
+void checkForCard()
+{
+  if (mfrc522.PICC_IsNewCardPresent())
+
+    fsm.event = presentCard_Event;
+}
+
+void handleCard()
+{
+
+  if (!mfrc522.PICC_IsNewCardPresent())
+    return;
+
+  // Select one of the cards
+  if (!mfrc522.PICC_ReadCardSerial())
+    return;
+
+  // Show some details of the PICC (that is: the tag/card)
+  Serial.print(F("Card UID:"));
+  dump_byte_array(mfrc522.uid.uidByte, mfrc522.uid.size);
+  Serial.println();
+  Serial.print(F("PICC type: "));
+  MFRC522::PICC_Type piccType = mfrc522.PICC_GetType(mfrc522.uid.sak);
+  Serial.println(mfrc522.PICC_GetTypeName(piccType));
+
+  // Check for compatibility
+  if (piccType != MFRC522::PICC_TYPE_MIFARE_MINI && piccType != MFRC522::PICC_TYPE_MIFARE_1K && piccType != MFRC522::PICC_TYPE_MIFARE_4K)
+  {
+    Serial.println(F("This sample only works with MIFARE Classic cards."));
+    return;
+  }
+
+  // In this sample we use the second sector,
+  // that is: sector #1, covering block #4 up to and including block #7
+  byte sector = 1;
+  byte blockAddr = 4;
+  byte dataBlock[] = {
+      0x01, 0x02, 0x03, 0x04, //  1,  2,   3,  4,
+      0x05, 0x06, 0x07, 0x08, //  5,  6,   7,  8,
+      0x09, 0x0a, 0xff, 0x0b, //  9, 10, 255, 11,
+      0x0c, 0x0d, 0x0e, 0x0f  // 12, 13, 14, 15
+  };
+  byte trailerBlock = 7;
+  MFRC522::StatusCode status;
+  byte buffer[18];
+  byte size = sizeof(buffer);
+
+  // Authenticate using key A
+  Serial.println(F("Authenticating using key A..."));
+  status = (MFRC522::StatusCode)mfrc522.PCD_Authenticate(MFRC522::PICC_CMD_MF_AUTH_KEY_A, trailerBlock, &key, &(mfrc522.uid));
+  if (status != MFRC522::STATUS_OK)
+  {
+    Serial.print(F("PCD_Authenticate() failed: "));
+    Serial.println(mfrc522.GetStatusCodeName(status));
+    return;
+  }
+
+  // Show the whole sector as it currently is
+  Serial.println(F("Current data in sector:"));
+  mfrc522.PICC_DumpMifareClassicSectorToSerial(&(mfrc522.uid), &key, sector);
+  Serial.println();
+
+  // Read data from the block
+  Serial.print(F("Reading data from block "));
+  Serial.print(blockAddr);
+  Serial.println(F(" ..."));
+  status = (MFRC522::StatusCode)mfrc522.MIFARE_Read(blockAddr, buffer, &size);
+  if (status != MFRC522::STATUS_OK)
+  {
+    Serial.print(F("MIFARE_Read() failed: "));
+    Serial.println(mfrc522.GetStatusCodeName(status));
+  }
+  Serial.print(F("Data in block "));
+  Serial.print(blockAddr);
+  Serial.println(F(":"));
+  dump_byte_array(buffer, 16);
+  Serial.println();
+  Serial.println();
+
+  // Authenticate using key B
+  Serial.println(F("Authenticating again using key B..."));
+  status = (MFRC522::StatusCode)mfrc522.PCD_Authenticate(MFRC522::PICC_CMD_MF_AUTH_KEY_B, trailerBlock, &key, &(mfrc522.uid));
+  if (status != MFRC522::STATUS_OK)
+  {
+    Serial.print(F("PCD_Authenticate() failed: "));
+    Serial.println(mfrc522.GetStatusCodeName(status));
+    return;
+  }
+
+  // Write data to the block
+  Serial.print(F("Writing data into block "));
+  Serial.print(blockAddr);
+  Serial.println(F(" ..."));
+  dump_byte_array(dataBlock, 16);
+  Serial.println();
+  status = (MFRC522::StatusCode)mfrc522.MIFARE_Write(blockAddr, dataBlock, 16);
+  if (status != MFRC522::STATUS_OK)
+  {
+    Serial.print(F("MIFARE_Write() failed: "));
+    Serial.println(mfrc522.GetStatusCodeName(status));
+  }
+  Serial.println();
+
+  // Read data from the block (again, should now be what we have written)
+  Serial.print(F("Reading data from block "));
+  Serial.print(blockAddr);
+  Serial.println(F(" ..."));
+  status = (MFRC522::StatusCode)mfrc522.MIFARE_Read(blockAddr, buffer, &size);
+  if (status != MFRC522::STATUS_OK)
+  {
+    Serial.print(F("MIFARE_Read() failed: "));
+    Serial.println(mfrc522.GetStatusCodeName(status));
+  }
+  Serial.print(F("Data in block "));
+  Serial.print(blockAddr);
+  Serial.println(F(":"));
+  dump_byte_array(buffer, 16);
+  Serial.println();
+
+  // Check that data in block is what we have written
+  // by counting the number of bytes that are equal
+  Serial.println(F("Checking result..."));
+  byte count = 0;
+  for (byte i = 0; i < 16; i++)
+  {
+    // Compare buffer (= what we've read) with dataBlock (= what we've written)
+    if (buffer[i] == dataBlock[i])
+      count++;
+  }
+  Serial.print(F("Number of bytes that match = "));
+  Serial.println(count);
+  if (count == 16)
+  {
+    Serial.println(F("Success :-)"));
+  }
+  else
+  {
+    Serial.println(F("Failure, no match :-("));
+    Serial.println(F("  perhaps the write didn't work properly..."));
+  }
+  Serial.println();
+
+  // Dump the sector data
+  Serial.println(F("Current data in sector:"));
+  mfrc522.PICC_DumpMifareClassicSectorToSerial(&(mfrc522.uid), &key, sector);
+  Serial.println();
+
+  // Halt PICC
+  mfrc522.PICC_HaltA();
+  // Stop encryption on PCD
+  mfrc522.PCD_StopCrypto1();
+}
+
+/***************************************************
+ Sounduino DFPlayerMini Functions
+
+ ****************************************************/
+void initializeDFPlayerMini()
+{
+
+  mySoftwareSerial.begin(9600);
+
+  Serial.println();
+  Serial.println(F("DFRobot DFPlayer Mini Demo"));
+  Serial.println(F("Initializing DFPlayer ... (May take 3~5 seconds)"));
+
+  if (!myDFPlayer.begin(mySoftwareSerial))
+  { //Use softwareSerial to communicate with mp3.
+    Serial.println(F("Unable to begin:"));
+    Serial.println(F("1.Please recheck the connection!"));
+    Serial.println(F("2.Please insert the SD card!"));
+    while (true)
+      ;
+  }
+  Serial.println(F("DFPlayer Mini online."));
+
+  myDFPlayer.setTimeOut(500); //Set serial communictaion time out 500ms
+  myDFPlayer.EQ(DFPLAYER_EQ_NORMAL);
+  myDFPlayer.volume(0);
 }

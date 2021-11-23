@@ -1,0 +1,14 @@
+                                                                                                                                                                                        
+                       target state                                                                                                                                                     
+                        notPlaying        playingShuffle          playingSerial        playingCard       playingStopdance       progWait      progDelete   progPending deterPlayingState      Menu       
+init   notPlaying                                                                      present Card                                                                    big red short prebig red double pr
+     playingShuffle  big red short prforward/previous short p                                                                big red long pr                                            big red double pr
+      playingSerial  big red short pr                        forward/previous short p                                        big red long pr                                            big red double pr
+       playingCard   big red short pr                                                                                                       big red long pr                             big red double pr
+    playingStopdance big red short pr                                                                forward/previous short pbig red long pr                                            big red double pr
+        progWait                                                                                                                                           present Cardbig red long pres
+       progDelete                                                                                                                                          present Card                 
+       progPending                                                                                                                                                      card programmed 
+    deterPlayingStatedeterminationFai   this was last mode      this was last mode   this was last mo   this was last mode                                                              
+          menu                         big red short press     forward short press                     previous short press                                            big red double pr
+      initializing   initializing don                                                                                                                                  big red short pre
