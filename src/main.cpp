@@ -1,18 +1,20 @@
 #include "Arduino.h"
 
-// Match Button constants to pins
-const int BIGRED = 5;
-const int FWD = 6;
-const int PREV = 7;
+/***************************************************
+ Sounduino Potentiometer
 
-// Setup for potentiometer to control volume
+ ****************************************************/
 const int VOLUME = A1;
 int volumeCurrent = 0;
 int currentVolumeValue = 0;
 int volumeValue = 0;
 
-// count state transitions
+/***************************************************
+ Sounduino Helper
+
+ ****************************************************/
 int transitioncounter = 0;
+long lastMillis = 0;
 
 #include "OneButton.h"
 // Initialize Buttons with OneButton Library
@@ -32,6 +34,11 @@ Redistribution and use in source and binary forms, with or without modification,
 
 THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
+
+const int BIGRED = 5;
+const int FWD = 6;
+const int PREV = 7;
+
 OneButton btnBigRed(BIGRED, false);
 OneButton btnFwd(FWD, false);
 OneButton btnPrev(PREV, false);
@@ -75,9 +82,6 @@ OneButton btnPrev(PREV, false);
 MFRC522 mfrc522(SS_PIN, RST_PIN); // Create MFRC522 instance.
 MFRC522::MIFARE_Key key;
 
-#include <DFRobotDFPlayerMini.h>
-#include <SoftwareSerial.h>
-
 /***************************************************
  DFPlayer - A Mini MP3 Player For Arduino
  <https://www.dfrobot.com/product-1121.html>
@@ -99,8 +103,16 @@ MFRC522::MIFARE_Key key;
  2.This code is tested on Arduino Uno, Leonardo, Mega boards.
  ****************************************************/
 
-SoftwareSerial mySoftwareSerial(2, 3); // RX, TX
-DFRobotDFPlayerMini myDFPlayer;
+#include <DFPlayerMini_Fast.h>
+
+#if !defined(UBRR1H)
+#include <SoftwareSerial.h>
+SoftwareSerial mySerial(2, 3); // RX, TX
+#endif
+
+DFPlayerMini_Fast mp3player;
+int lastmp3PlayerAvailable;
+const int BUSY = 4;
 
 /***************************************************
  Sounduino States and Events
@@ -312,6 +324,7 @@ void setup()
   Serial.println(F("BEWARE: Data will be written to the PICC, in sector #1"));
 
   fsm.state = transNotPlaying();
+  lastMillis = millis();
   Serial.println("---------- End Setup ----------");
   Serial.println("");
 }
@@ -337,6 +350,19 @@ void loop()
   //check for card
   checkForCard();
 
+  // Do I even need this?
+  /*     if ((fsm.event == no_Event) && (millis() - lastMillis > 500))
+  {
+    int mp3PlayerAvailable = digitalRead(BUSY);
+    if (lastmp3PlayerAvailable == 0 && mp3PlayerAvailable == 1)
+    {
+      Serial.println("Song Ended!");
+      fsm.event = songEnded_Event;
+    }
+    lastmp3PlayerAvailable = mp3PlayerAvailable;
+    lastMillis = millis();
+  } */
+
   //evaluate state
   if (fsm.event != no_Event)
   {
@@ -354,6 +380,7 @@ void loop()
     Serial.print(stateToText(fsm.state));
     Serial.println("");
     transitioncounter++;
+    lastMillis = millis();
   }
 }
 
@@ -370,10 +397,9 @@ void handlePotentiometer()
   if (volumeValue != currentVolumeValue)
   {
     currentVolumeValue = volumeValue;
-    String printout = "Volume:";
-    printout = printout + currentVolumeValue;
-    Serial.println(printout);
-    myDFPlayer.volume(currentVolumeValue);
+    Serial.print("Volume:");
+    Serial.println(currentVolumeValue);
+    mp3player.volume(currentVolumeValue);
   }
 }
 
@@ -407,7 +433,7 @@ void onPrevPress()
 SounduinoState transNotPlaying(void)
 {
   saveLastPlayState();
-  myDFPlayer.pause();
+  mp3player.pause();
   Serial.println("Transition to: not Playing");
   return notPlaying_State;
 }
@@ -420,9 +446,9 @@ SounduinoState transPlayingSerial(void)
 SounduinoState transPlayingShuffle(void)
 {
   if (fsm.stateProperties.paused)
-    myDFPlayer.start();
+    mp3player.resume();
   else
-    myDFPlayer.randomAll();
+    mp3player.randomAll();
   Serial.println("Transition to: playingShuffle");
   return playingShuffle_State;
 }
@@ -721,23 +747,15 @@ void handleCard()
 void initializeDFPlayerMini()
 {
 
-  mySoftwareSerial.begin(9600);
-
-  Serial.println();
-  Serial.println(F("DFRobot DFPlayer Mini Demo"));
-  Serial.println(F("Initializing DFPlayer ... (May take 3~5 seconds)"));
-
-  if (!myDFPlayer.begin(mySoftwareSerial))
-  { //Use softwareSerial to communicate with mp3.
-    Serial.println(F("Unable to begin:"));
-    Serial.println(F("1.Please recheck the connection!"));
-    Serial.println(F("2.Please insert the SD card!"));
-    while (true)
-      ;
-  }
-  Serial.println(F("DFPlayer Mini online."));
-
-  myDFPlayer.setTimeOut(500); //Set serial communictaion time out 500ms
-  myDFPlayer.EQ(DFPLAYER_EQ_NORMAL);
-  myDFPlayer.volume(0);
+  pinMode(BUSY, INPUT);
+#if !defined(UBRR1H)
+  mySerial.begin(9600);
+  mp3player.begin(mySerial, true);
+  delay(1000);
+#else
+  Serial1.begin(9600);
+  mp3player.begin(Serial1, true);
+#endif
+  mp3player.volume(0);
+  mp3player.EQSelect(0);
 }
