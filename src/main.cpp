@@ -232,8 +232,7 @@ void saveLastPlayState();
 
 typedef struct
 {
-  int test;
-  int test2;
+  bool paused;
 } SounduinoStateProperties;
 
 typedef struct
@@ -243,7 +242,7 @@ typedef struct
   SounduinoStateProperties stateProperties;
 } SounduinoStateMachine;
 
-SounduinoStateMachine fsm = {.state = initializing_State, .event = no_Event, .stateProperties = {.test = 1, .test2 = 2}};
+SounduinoStateMachine fsm = {.state = initializing_State, .event = no_Event, .stateProperties = {.paused = false}};
 
 /***************************************************
  Sounduino Utility Function headers
@@ -420,7 +419,10 @@ SounduinoState transPlayingSerial(void)
 }
 SounduinoState transPlayingShuffle(void)
 {
-  myDFPlayer.play(1);
+  if (fsm.stateProperties.paused)
+    myDFPlayer.start();
+  else
+    myDFPlayer.randomAll();
   Serial.println("Transition to: playingShuffle");
   return playingShuffle_State;
 }
@@ -480,6 +482,7 @@ SounduinoState doNothing(void)
 
 void saveLastPlayState()
 {
+  fsm.stateProperties.paused = true;
   switch (fsm.state)
   {
   case playingShuffle_State:
@@ -498,6 +501,7 @@ void saveLastPlayState()
     transToLastPlayState = transPlayingStopdance;
     break;
   default:
+    fsm.stateProperties.paused = false;
     transToLastPlayState = transPlayingShuffle;
     break;
   }
