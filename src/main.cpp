@@ -1,6 +1,13 @@
 #include "Arduino.h"
 
 /***************************************************
+ Sounduino Absolute Globals
+
+ ****************************************************/
+
+#define TRACK_COUNT 3
+
+/***************************************************
  Sounduino Potentiometer
 
  ****************************************************/
@@ -176,6 +183,7 @@ SounduinoState transDeterPlayingState(void);
 SounduinoState transMenu(void);
 SounduinoState transInitializing(void);
 SounduinoState doNothing(void);
+SounduinoState playHelp(void);
 
 void initializeTransitionTable()
 {
@@ -224,6 +232,7 @@ void initializeTransitionTable()
 
   transitionTable[menu_State][bigRedSingle_Event] = transPlayingShuffle;
   transitionTable[menu_State][bigRedDouble_Event] = transDeterPlayingState;
+  transitionTable[menu_State][bigRedLong_Event] = playHelp;
   transitionTable[menu_State][fwdSingle_Event] = transPlayingSerial;
   transitionTable[menu_State][prevSingle_Event] = transPlayingStopdance;
 
@@ -245,6 +254,7 @@ void saveLastPlayState();
 typedef struct
 {
   bool paused;
+  int currentRandomTrack;
 } SounduinoStateProperties;
 
 typedef struct
@@ -254,7 +264,7 @@ typedef struct
   SounduinoStateProperties stateProperties;
 } SounduinoStateMachine;
 
-SounduinoStateMachine fsm = {.state = initializing_State, .event = no_Event, .stateProperties = {.paused = false}};
+SounduinoStateMachine fsm = {.state = initializing_State, .event = no_Event, .stateProperties = {.paused = false, .currentRandomTrack = 0}};
 
 /***************************************************
  Sounduino Utility Function headers
@@ -271,6 +281,7 @@ void checkForCard();
 void dump_byte_array(byte *buffer, byte bufferSize);
 void initializeTransitionTable();
 void initializeDFPlayerMini();
+void playRandom();
 
 char *eventToText(SounduinoEvent event);
 char *stateToText(SounduinoState state);
@@ -432,23 +443,91 @@ void onPrevPress()
 
 SounduinoState transNotPlaying(void)
 {
-  saveLastPlayState();
-  mp3player.pause();
+
+  if (fsm.state != initializing_State)
+  {
+    saveLastPlayState();
+    mp3player.pause();
+  }
+  else
+  {
+    mp3player.stop();
+    fsm.stateProperties.paused = false;
+    mp3player.resume();
+  }
   Serial.println("Transition to: not Playing");
   return notPlaying_State;
 }
 
 SounduinoState transPlayingSerial(void)
 {
+
+  // start new playlist from 1 if serial is selected via menu, otherwise just resume
+  // Announce new play mode if playmode is selected via menu, but not at just leaving the menu
+  if (fsm.state == menu_State && fsm.event == bigRedSingle_Event)
+  {
+    if (fsm.stateProperties.paused)
+      mp3player.resume();
+    else
+      mp3player.play(1);
+    mp3player.playAdvertisement(8);
+  }
+
+  // handle pause
+  if (fsm.state == notPlaying_State)
+  {
+    if (fsm.stateProperties.paused)
+      mp3player.resume();
+    else
+    {
+      mp3player.play(1);
+    }
+  }
+
   Serial.println("Transition to: playingSerial");
   return playingSerial_State;
 }
 SounduinoState transPlayingShuffle(void)
 {
-  if (fsm.stateProperties.paused)
-    mp3player.resume();
-  else
-    mp3player.randomAll();
+  // start new random playlist if shuffle is selected via menu, otherwise just resume
+  // Announce new play mode if playmode is selected via menu, but not at just leaving the menu
+  if (fsm.state == menu_State && fsm.event == bigRedSingle_Event)
+  {
+    if (fsm.stateProperties.paused)
+    {
+      mp3player.resume();
+    }
+    else
+    {
+      playRandom();
+    }
+    //randomTrackinFolder(1);
+
+    mp3player.playAdvertisement(8);
+  }
+
+  // if pressed on next or Previous
+  if (fsm.state == playingShuffle_State && (fsm.event == fwdSingle_Event || fsm.event == prevSingle_Event))
+  {
+
+    playRandom();
+  }
+
+  // handle pause
+  if (fsm.state == notPlaying_State)
+  {
+    if (fsm.stateProperties.paused)
+    {
+      mp3player.resume();
+    }
+    else
+    {
+      Serial.println("random");
+      playRandom();
+      //randomTrackinFolder(1);
+    }
+  }
+
   Serial.println("Transition to: playingShuffle");
   return playingShuffle_State;
 }
@@ -459,22 +538,30 @@ SounduinoState transPlayingCard(void)
 }
 SounduinoState transPlayingStopdance(void)
 {
+  // Announce new play mode if playmode is selected via menu, but not at just leaving the menu
+  if (fsm.state == menu_State && fsm.event != bigRedDouble_Event)
+    mp3player.playAdvertisement(9);
+
   Serial.println("Transition to: playingStopdance");
   return playingStopdance_State;
 }
 SounduinoState transProgWait(void)
 {
   saveLastPlayState();
+  mp3player.playAdvertisement(6);
   Serial.println("Transition to: progWait");
   return progWait_State;
 }
 SounduinoState transProgDelete(void)
 {
+
   Serial.println("Transition to: progDelete");
+  mp3player.playAdvertisement(3);
   return progDelete_State;
 }
 SounduinoState transProgPending(void)
 {
+  mp3player.playAdvertisement(5);
   Serial.println("Transition to: progPending");
   return progPending_State;
 }
@@ -487,6 +574,14 @@ SounduinoState transDeterPlayingState(void)
 SounduinoState transMenu(void)
 {
   saveLastPlayState();
+  mp3player.playAdvertisement(2);
+  Serial.println("Transition to: menu");
+  return menu_State;
+}
+
+SounduinoState playHelp(void)
+{
+  mp3player.playAdvertisement(1);
   Serial.println("Transition to: menu");
   return menu_State;
 }
@@ -505,6 +600,23 @@ SounduinoState doNothing(void)
  Sounduino Utility Functions
 
  ****************************************************/
+
+void playRandom()
+{
+  int randomTrack = 0;
+
+  do
+  {
+    randomTrack = random(1, TRACK_COUNT + 1);
+    Serial.print("lastRandom: ");
+    Serial.print(fsm.stateProperties.currentRandomTrack);
+    Serial.print(" || calculated Random:");
+    Serial.println(randomTrack);
+  } while (randomTrack == fsm.stateProperties.currentRandomTrack);
+
+  mp3player.playFromMP3Folder(randomTrack);
+  fsm.stateProperties.currentRandomTrack = randomTrack;
+}
 
 void saveLastPlayState()
 {
