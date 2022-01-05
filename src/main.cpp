@@ -13,6 +13,7 @@
  ****************************************************/
 #include <pins.cpp>
 #include <transitions.h>
+#include <event_handler.h>
 
 /***************************************************
  Sounduino Potentiometer
@@ -168,12 +169,6 @@ void initializeTransitionTable()
  Sounduino Utility Function headers
 
  ****************************************************/
-void onBigRedPress();
-void onBigRedDoublePress();
-void onBigRedLongPress();
-void onFwdPress();
-void onPrevPress();
-void handlePotentiometer();
 void handleCard();
 void checkForCard();
 void dump_byte_array(byte *buffer, byte bufferSize);
@@ -199,18 +194,18 @@ void setup()
   //initialize last-state function pointer to fall back to shuffle
   changeLastPlayStateTransitionFunction(transPlayingShuffle);
 
-  transInitializing(mp3player, fsm);
+  transInitializing(&mp3player, &fsm);
 
   initializeTransitionTable();
 
   // initialize possible button actions
-  btnBigRed.attachClick(onBigRedPress);
-  btnBigRed.attachDoubleClick(onBigRedDoublePress);
-  btnBigRed.attachLongPressStop(onBigRedLongPress);
+  btnBigRed.attachClick(onBigRedPress, &fsm);
+  btnBigRed.attachDoubleClick(onBigRedDoublePress, &fsm);
+  btnBigRed.attachLongPressStop(onBigRedLongPress, &fsm);
 
-  btnFwd.attachClick(onFwdPress);
+  btnFwd.attachClick(onFwdPress, &fsm);
 
-  btnPrev.attachClick(onPrevPress);
+  btnPrev.attachClick(onPrevPress, &fsm);
 
   SPI.begin();        // Init SPI bus
   mfrc522.PCD_Init(); // Init MFRC522 card
@@ -229,7 +224,7 @@ void setup()
 
   Serial.println(F("BEWARE: Data will be written to the PICC, in sector #1"));
 
-  fsm.state = transNotPlaying(mp3player, fsm);
+  fsm.state = transNotPlaying(&mp3player, &fsm);
   lastMillis = millis();
   Serial.println("---------- End Setup ----------");
   Serial.println("");
@@ -251,23 +246,10 @@ void loop()
   btnPrev.tick();
 
   //handle potentiometer
-  handlePotentiometer();
+  handlePotentiometer(&mp3player, &volumeCurrent, &volumeValue, &currentVolumeValue);
 
   //check for card
-  checkForCard();
-
-  // Do I even need this?
-  /*     if ((fsm.event == no_Event) && (millis() - lastMillis > 500))
-  {
-    int mp3PlayerAvailable = digitalRead(BUSY);
-    if (lastmp3PlayerAvailable == 0 && mp3PlayerAvailable == 1)
-    {
-      Serial.println("Song Ended!");
-      fsm.event = songEnded_Event;
-    }
-    lastmp3PlayerAvailable = mp3PlayerAvailable;
-    lastMillis = millis();
-  } */
+  checkForCard(&mfrc522, &fsm);
 
   //evaluate state
   if (fsm.event != no_Event)
@@ -281,54 +263,13 @@ void loop()
     Serial.print("Event: ");
     Serial.println(eventToText(fsm.event));
     Serial.print("Action: ");
-    fsm.state = transitionTable[fsm.state][fsm.event](mp3player, fsm);
+    fsm.state = transitionTable[fsm.state][fsm.event](&mp3player, &fsm);
     Serial.print("After: ");
     Serial.print(stateToText(fsm.state));
     Serial.println("");
     transitioncounter++;
     lastMillis = millis();
   }
-}
-
-/***************************************************
- Sounduino Event Functions
-
- ****************************************************/
-
-void handlePotentiometer()
-{
-  volumeCurrent = analogRead(VOLUME);
-  volumeValue = round(volumeCurrent / 1024.0 * 30);
-
-  if (volumeValue != currentVolumeValue)
-  {
-    currentVolumeValue = volumeValue;
-    Serial.print("Volume:");
-    Serial.println(currentVolumeValue);
-    mp3player.volume(currentVolumeValue);
-  }
-}
-
-void onBigRedPress()
-{
-  fsm.event = bigRedSingle_Event;
-}
-
-void onBigRedDoublePress()
-{
-  fsm.event = bigRedDouble_Event;
-}
-void onBigRedLongPress()
-{
-  fsm.event = bigRedLong_Event;
-}
-void onFwdPress()
-{
-  fsm.event = fwdSingle_Event;
-}
-void onPrevPress()
-{
-  fsm.event = prevSingle_Event;
 }
 
 /***************************************************
@@ -346,13 +287,6 @@ void dump_byte_array(byte *buffer, byte bufferSize)
     Serial.print(buffer[i] < 0x10 ? " 0" : " ");
     Serial.print(buffer[i], HEX);
   }
-}
-
-void checkForCard()
-{
-  if (mfrc522.PICC_IsNewCardPresent())
-
-    fsm.event = presentCard_Event;
 }
 
 void handleCard()

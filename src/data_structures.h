@@ -56,5 +56,5 @@ typedef struct
 } SounduinoStateMachine;
 
 //typedef of a function pointer to use in the following transition table
-typedef SounduinoState (*SounduinoEventHandler)(DFPlayerMini_Fast, SounduinoStateMachine);
+typedef SounduinoState (*SounduinoEventHandler)(DFPlayerMini_Fast *mp3player, SounduinoStateMachine *fsm);
 #endif
