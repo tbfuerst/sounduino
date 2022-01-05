@@ -2,8 +2,9 @@
 #define EVENT_HANDLER_H
 
 #include <Arduino.h>
-#include <utility.h>
 #include <MFRC522.h>
+#include <utility.h>
+#include <pins.h>
 
 void handlePotentiometer(DFPlayerMini_Fast *mp3player, int *volumeCurrent, int *volumeValue, int *currentVolumeValue);
 void onBigRedPress(SounduinoStateMachine *fsm);

@@ -1,6 +1,4 @@
-#include <Arduino.h>
-#include <utility.h>
-#include <DFPlayerMini_Fast.h>
+#include <transitions.h>
 
 /***************************************************
  Sounduino Transition functions

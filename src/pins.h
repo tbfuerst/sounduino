@@ -1,3 +1,6 @@
+#ifndef PINS_H
+#define PINS_H
+
 #include <Arduino.h>
 /***************************************************
  Sounduino Potentiometer
@@ -46,3 +49,5 @@ const int PREV = 7;
   */
 #define RST_PIN 9 // Configurable, see typical pin layout above
 #define SS_PIN 10 // Configurable, see typical pin layout above
+
+#endif

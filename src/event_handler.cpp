@@ -1,8 +1,4 @@
-#include <Arduino.h>
 #include <event_handler.h>
-#include <MFRC522.h>
-#include <utility.h>
-#include <pins.cpp>
 
 void handlePotentiometer(DFPlayerMini_Fast *mp3player, int *volumeCurrent, int *volumeValue, int *currentVolumeValue)
 {
