@@ -8,10 +8,17 @@
 #define TRACK_COUNT 3
 
 /***************************************************
+ Sounduino Imports
+
+ ****************************************************/
+#include <pins.cpp>
+#include <transitions.h>
+
+/***************************************************
  Sounduino Potentiometer
 
  ****************************************************/
-const int VOLUME = A1;
+
 int volumeCurrent = 0;
 int currentVolumeValue = 0;
 int volumeValue = 0;
@@ -42,50 +49,19 @@ Redistribution and use in source and binary forms, with or without modification,
 THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-const int BIGRED = 5;
-const int FWD = 6;
-const int PREV = 7;
-
 OneButton btnBigRed(BIGRED, false);
 OneButton btnFwd(FWD, false);
 OneButton btnPrev(PREV, false);
 
+/***************************************************
+ MFRC522 RFID Card Module Setup
+
+ ****************************************************/
+
 #include <SPI.h>
 #include <MFRC522.h>
 #include <stdint.h>
-/**
- * ----------------------------------------------------------------------------
- * This is a MFRC522 library example; see https://github.com/miguelbalboa/rfid
- * for further details and other examples.
- *
- * NOTE: The library file MFRC522.h has a lot of useful info. Please read it.
- *
- * Released into the public domain.
- * ----------------------------------------------------------------------------
- * This sample shows how to read and write data blocks on a MIFARE Classic PICC
- * (= card/tag).
- *
- * BEWARE: Data will be written to the PICC, in sector #1 (blocks #4 to #7).
- *
-  * -----------------------------------------
-  * Pin layout
-  * -----------------------------------------
-  * MFRC522      Arduino
-  * Reader       Nano
-  * Pin          Pin
-  * -----------------------------------------
-  * RST          D9
-  * SDA(SS)      D10
-  * MOSI         D11
-  * MISO         D12
-  * SCK          D13
-  * NC(IRQ)      not used
-  * 3.3V         3.3V
-  * GND          GND
-  * --------------------------------------------------------------------------
-  */
-#define RST_PIN 9                 // Configurable, see typical pin layout above
-#define SS_PIN 10                 // Configurable, see typical pin layout above
+
 MFRC522 mfrc522(SS_PIN, RST_PIN); // Create MFRC522 instance.
 MFRC522::MIFARE_Key key;
 
@@ -121,69 +97,18 @@ DFPlayerMini_Fast mp3player;
 int lastmp3PlayerAvailable;
 const int BUSY = 4;
 
-/***************************************************
- Sounduino States and Events
-
- ****************************************************/
-typedef enum
-{
-  notPlaying_State,
-  playingSerial_State,
-  playingShuffle_State,
-  playingCard_State,
-  playingStopdance_State,
-  progWait_State,
-  progDelete_State,
-  progPending_State,
-  deterPlayingState_State,
-  menu_State,
-  initializing_State,
-  state_count
-} SounduinoState;
-
-// Events definition for Sounduino FSM
-typedef enum
-{
-  bigRedSingle_Event,
-  bigRedDouble_Event,
-  bigRedLong_Event,
-  songEnded_Event,
-  fwdSingle_Event,
-  prevSingle_Event,
-  presentCard_Event,
-  initialized_Event,
-  determinationFailed_Event,
-  cardProgrammingFailed_Event,
-  cardProgrammed_Event,
-  no_Event,
-  event_count
-} SounduinoEvent;
-
-/***************************************************
- Sounduino State Machine Transition Table
-
- ****************************************************/
-
-//typedef of a function pointer to use in the following transition table
-typedef SounduinoState (*SounduinoEventHandler)(void);
-
 //declaration of a transition table which includes function pointers to the respective transition function
 SounduinoEventHandler transitionTable[state_count][event_count];
 
-// transition function headers
-SounduinoState transNotPlaying(void);
-SounduinoState transPlayingSerial(void);
-SounduinoState transPlayingShuffle(void);
-SounduinoState transPlayingCard(void);
-SounduinoState transPlayingStopdance(void);
-SounduinoState transProgWait(void);
-SounduinoState transProgDelete(void);
-SounduinoState transProgPending(void);
-SounduinoState transDeterPlayingState(void);
-SounduinoState transMenu(void);
-SounduinoState transInitializing(void);
-SounduinoState doNothing(void);
-SounduinoState playHelp(void);
+/***************************************************
+ Sounduino State Machine
+
+ ***************************************************
+ This state machine uses a Lookup table to make State transitions
+
+ ****************************************************/
+
+SounduinoStateMachine fsm = {.state = initializing_State, .event = no_Event, .stateProperties = {.paused = false, .currentRandomTrack = 0}};
 
 void initializeTransitionTable()
 {
@@ -239,33 +164,6 @@ void initializeTransitionTable()
   transitionTable[deterPlayingState_State][determinationFailed_Event] = transNotPlaying;
 }
 
-//function pointer to store last playing State to transition to
-SounduinoEventHandler transToLastPlayState;
-void saveLastPlayState();
-
-/***************************************************
- Sounduino State Machine
-
- ***************************************************
- This state machine uses a Lookup table to make State transitions
-
- ****************************************************/
-
-typedef struct
-{
-  bool paused;
-  int currentRandomTrack;
-} SounduinoStateProperties;
-
-typedef struct
-{
-  SounduinoState state;
-  SounduinoEvent event;
-  SounduinoStateProperties stateProperties;
-} SounduinoStateMachine;
-
-SounduinoStateMachine fsm = {.state = initializing_State, .event = no_Event, .stateProperties = {.paused = false, .currentRandomTrack = 0}};
-
 /***************************************************
  Sounduino Utility Function headers
 
@@ -283,9 +181,6 @@ void initializeTransitionTable();
 void initializeDFPlayerMini();
 void playRandom();
 
-char *eventToText(SounduinoEvent event);
-char *stateToText(SounduinoState state);
-
 /***************************************************
  Sounduino Program Setup
 
@@ -302,9 +197,9 @@ void setup()
   initializeDFPlayerMini();
 
   //initialize last-state function pointer to fall back to shuffle
-  transToLastPlayState = transPlayingShuffle;
+  changeLastPlayStateTransitionFunction(transPlayingShuffle);
 
-  transInitializing();
+  transInitializing(mp3player, fsm);
 
   initializeTransitionTable();
 
@@ -334,7 +229,7 @@ void setup()
 
   Serial.println(F("BEWARE: Data will be written to the PICC, in sector #1"));
 
-  fsm.state = transNotPlaying();
+  fsm.state = transNotPlaying(mp3player, fsm);
   lastMillis = millis();
   Serial.println("---------- End Setup ----------");
   Serial.println("");
@@ -386,7 +281,7 @@ void loop()
     Serial.print("Event: ");
     Serial.println(eventToText(fsm.event));
     Serial.print("Action: ");
-    fsm.state = transitionTable[fsm.state][fsm.event]();
+    fsm.state = transitionTable[fsm.state][fsm.event](mp3player, fsm);
     Serial.print("After: ");
     Serial.print(stateToText(fsm.state));
     Serial.println("");
@@ -434,252 +329,6 @@ void onFwdPress()
 void onPrevPress()
 {
   fsm.event = prevSingle_Event;
-}
-
-/***************************************************
- Sounduino Transition functions
-
- ****************************************************/
-
-SounduinoState transNotPlaying(void)
-{
-
-  if (fsm.state != initializing_State)
-  {
-    saveLastPlayState();
-    mp3player.pause();
-  }
-  else
-  {
-    mp3player.stop();
-    fsm.stateProperties.paused = false;
-    mp3player.resume();
-  }
-  Serial.println("Transition to: not Playing");
-  return notPlaying_State;
-}
-
-SounduinoState transPlayingSerial(void)
-{
-
-  // start new playlist from 1 if serial is selected via menu, otherwise just resume
-  // Announce new play mode if playmode is selected via menu, but not at just leaving the menu
-  if (fsm.state == menu_State && fsm.event == bigRedSingle_Event)
-  {
-    if (fsm.stateProperties.paused)
-      mp3player.resume();
-    else
-      mp3player.play(1);
-    mp3player.playAdvertisement(8);
-  }
-
-  // handle pause
-  if (fsm.state == notPlaying_State)
-  {
-    if (fsm.stateProperties.paused)
-      mp3player.resume();
-    else
-    {
-      mp3player.play(1);
-    }
-  }
-
-  Serial.println("Transition to: playingSerial");
-  return playingSerial_State;
-}
-SounduinoState transPlayingShuffle(void)
-{
-  // start new random playlist if shuffle is selected via menu, otherwise just resume
-  // Announce new play mode if playmode is selected via menu, but not at just leaving the menu
-  if (fsm.state == menu_State && fsm.event == bigRedSingle_Event)
-  {
-    if (fsm.stateProperties.paused)
-    {
-      mp3player.resume();
-    }
-    else
-    {
-      playRandom();
-    }
-    //randomTrackinFolder(1);
-
-    mp3player.playAdvertisement(8);
-  }
-
-  // if pressed on next or Previous
-  if (fsm.state == playingShuffle_State && (fsm.event == fwdSingle_Event || fsm.event == prevSingle_Event))
-  {
-
-    playRandom();
-  }
-
-  // handle pause
-  if (fsm.state == notPlaying_State)
-  {
-    if (fsm.stateProperties.paused)
-    {
-      mp3player.resume();
-    }
-    else
-    {
-      Serial.println("random");
-      playRandom();
-      //randomTrackinFolder(1);
-    }
-  }
-
-  Serial.println("Transition to: playingShuffle");
-  return playingShuffle_State;
-}
-SounduinoState transPlayingCard(void)
-{
-  Serial.println("Transition to: playingCard");
-  return playingCard_State;
-}
-SounduinoState transPlayingStopdance(void)
-{
-  // Announce new play mode if playmode is selected via menu, but not at just leaving the menu
-  if (fsm.state == menu_State && fsm.event != bigRedDouble_Event)
-    mp3player.playAdvertisement(9);
-
-  Serial.println("Transition to: playingStopdance");
-  return playingStopdance_State;
-}
-SounduinoState transProgWait(void)
-{
-  saveLastPlayState();
-  mp3player.playAdvertisement(6);
-  Serial.println("Transition to: progWait");
-  return progWait_State;
-}
-SounduinoState transProgDelete(void)
-{
-
-  Serial.println("Transition to: progDelete");
-  mp3player.playAdvertisement(3);
-  return progDelete_State;
-}
-SounduinoState transProgPending(void)
-{
-  mp3player.playAdvertisement(5);
-  Serial.println("Transition to: progPending");
-  return progPending_State;
-}
-SounduinoState transDeterPlayingState(void)
-{
-  // determine state to transition to
-  Serial.print("via deterPlayingState_State, ");
-  return transToLastPlayState();
-}
-SounduinoState transMenu(void)
-{
-  saveLastPlayState();
-  mp3player.playAdvertisement(2);
-  Serial.println("Transition to: menu");
-  return menu_State;
-}
-
-SounduinoState playHelp(void)
-{
-  mp3player.playAdvertisement(1);
-  Serial.println("Transition to: menu");
-  return menu_State;
-}
-SounduinoState transInitializing(void)
-{
-  Serial.println("Transition to: initializing");
-  return initializing_State;
-}
-SounduinoState doNothing(void)
-{
-  Serial.println("Nothing happens");
-  return fsm.state;
-}
-
-/***************************************************
- Sounduino Utility Functions
-
- ****************************************************/
-
-void playRandom()
-{
-  int randomTrack = 0;
-
-  do
-  {
-    randomTrack = random(1, TRACK_COUNT + 1);
-    Serial.print("lastRandom: ");
-    Serial.print(fsm.stateProperties.currentRandomTrack);
-    Serial.print(" || calculated Random:");
-    Serial.println(randomTrack);
-  } while (randomTrack == fsm.stateProperties.currentRandomTrack);
-
-  mp3player.playFromMP3Folder(randomTrack);
-  fsm.stateProperties.currentRandomTrack = randomTrack;
-}
-
-void saveLastPlayState()
-{
-  fsm.stateProperties.paused = true;
-  switch (fsm.state)
-  {
-  case playingShuffle_State:
-    transToLastPlayState = transPlayingShuffle;
-    break;
-  case playingSerial_State:
-    transToLastPlayState = transPlayingSerial;
-    break;
-  case notPlaying_State:
-    transToLastPlayState = transNotPlaying;
-    break;
-  case playingCard_State:
-    transToLastPlayState = transPlayingCard;
-    break;
-  case playingStopdance_State:
-    transToLastPlayState = transPlayingStopdance;
-    break;
-  default:
-    fsm.stateProperties.paused = false;
-    transToLastPlayState = transPlayingShuffle;
-    break;
-  }
-}
-
-char *stateToText(SounduinoState state)
-{
-  char *statetext[] = {
-      "notPlaying_State",
-      "playingSerial_State",
-      "playingShuffle_State",
-      "playingCard_State",
-      "playingStopdance_State",
-      "progWait_State",
-      "progDelete_State",
-      "progPending_State",
-      "deterPlayingState_State",
-      "menu_State",
-      "initializing_State",
-      "state_count"};
-  return statetext[state];
-}
-
-char *eventToText(SounduinoEvent event)
-{
-  char *eventtext[] = {
-      "bigRedSingle_Event",
-      "bigRedDouble_Event",
-      "bigRedLong_Event",
-      "songEnded_Event",
-      "fwdSingle_Event",
-      "prevSingle_Event",
-      "presentCard_Event",
-      "initialized_Event",
-      "determinationFailed_Event",
-      "cardProgrammingFailed_Event"
-      "cardProgrammed_Event",
-      "no_Event",
-      "event_count"};
-  return eventtext[event];
 }
 
 /***************************************************
